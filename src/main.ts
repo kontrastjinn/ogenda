@@ -167,8 +167,8 @@ export default class OgendaPlugin extends Plugin {
   }
 
   /** Effective display zone: settings override, else the system zone ("Follow System"). */  
-  private displayTz(): string {  
-    return this.settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;  
+  private store(): MonthlyStore {  
+    return new MonthlyStore(new ObsidianFileStore(this.app.vault), this.settings.storageFolder);  
   }
 
   // --- 日程文本导出 / 笔记插入(与面板同一条事件管线,保证导出即所见)---
