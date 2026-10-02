@@ -167,6 +167,9 @@ export default class OgendaPlugin extends Plugin {
   }
 
   /** Effective display zone: settings override, else the system zone ("Follow System"). */  
+  private displayTz(): string {  
+    return this.settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;  
+  }  
   private store(): MonthlyStore {  
     return new MonthlyStore(new ObsidianFileStore(this.app.vault), this.settings.storageFolder);  
   }
