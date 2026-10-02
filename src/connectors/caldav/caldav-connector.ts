@@ -33,16 +33,16 @@ export class CalDavConnector implements Connector {
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`CalDAV query failed: HTTP ${res.status}`);
     }
-    const out: AgendaEvent[] = [];
-    for (const ev of icalToEvents(r.ics, this.id, "caldav", this.cfg.displayTz)) {      
-      // resource href is a path relative to the calendar host; resolve to a full URL for D2 write-back
-      const fullHref = new URL(r.href, this.cfg.calendarUrl).toString();
-      for (const ev of icalToEvents(r.ics, this.id, "caldav")) {
-        ev.href = fullHref;
-        ev.etag = r.etag;
-        out.push(ev);
-      }
-    }
+    const out: AgendaEvent[] = [];  
+    for (const r of parseCalendarQuery(res.text)) {  
+      // resource href is a path relative to the calendar host; resolve to a full URL for D2 write-back  
+      const fullHref = new URL(r.href, this.cfg.calendarUrl).toString();  
+      for (const ev of icalToEvents(r.ics, this.id, "caldav", this.cfg.displayTz)) {  
+        ev.href = fullHref;  
+        ev.etag = r.etag;  
+        out.push(ev);  
+      }  
+    }  
     return dedupeByUid(out);
   }
 }
