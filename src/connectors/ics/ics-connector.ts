@@ -14,17 +14,16 @@ export type IcsFetch = (url: string) => Promise<{ status: number; text: string }
 
 const defaultFetch: IcsFetch = (url) => requestUrl({ url, method: "GET", throw: false });
 
-export class IcsConnector implements Connector {
-  id = "ics";
-  private url: string;
-  constructor(url: string, private doFetch: IcsFetch = defaultFetch) {
-    this.url = normalizeIcsUrl(url);
+export class IcsConnector implements Connector {  
+  id = "ics";  
+  private url: string;  
+  constructor(url: string, private doFetch: IcsFetch = defaultFetch, private displayTz?: string) {  
+    this.url = normalizeIcsUrl(url);  
   }
   async fetch(): Promise<AgendaEvent[]> {
     const res = await this.doFetch(this.url);
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`ICS GET ${this.url} -> HTTP ${res.status}`);
     }
-    return dedupeByUid(icalToEvents(res.text, "ics", "ics"));
-  }
+    return dedupeByUid(icalToEvents(res.text, "ics", "ics", this.displayTz));  }
 }
