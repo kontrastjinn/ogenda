@@ -166,8 +166,9 @@ export default class OgendaPlugin extends Plugin {
     }
   }
 
-  private store(): MonthlyStore {
-    return new MonthlyStore(new ObsidianFileStore(this.app.vault), this.settings.storageFolder);
+  /** Effective display zone: settings override, else the system zone ("Follow System"). */  
+  private displayTz(): string {  
+    return this.settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;  
   }
 
   // --- 日程文本导出 / 笔记插入(与面板同一条事件管线,保证导出即所见)---
@@ -232,7 +233,11 @@ export default class OgendaPlugin extends Plugin {
       this.syncStatus = "syncing";
       this.refreshOpenPanels();
       try {
-        const svc = new SyncService([new IcsConnector(r.url)], this.store(), (m) => new Notice(m, 10000));
+        const svc = new SyncService(  
+          [new IcsConnector(r.url, undefined, this.displayTz())],  
+          this.store(),  
+          (m) => new Notice(m, 10000),  
+        );
         await svc.syncNow();
         this.syncStatus = "success";
       } catch (e) {
@@ -246,7 +251,13 @@ export default class OgendaPlugin extends Plugin {
       return;
     }
     // icloud | caldav → bidirectional
-    const connector = new CalDavConnector({ user: r.user, pass: r.pass, calendarUrl: r.calUrl, label: r.provider });
+    const connector = new CalDavConnector({  
+      user: r.user,  
+      pass: r.pass,  
+      calendarUrl: r.calUrl,  
+      label: r.provider,  
+      displayTz: this.displayTz(),  
+    });
     const writer = new CalDavWriter({ user: r.user, pass: r.pass });
     const source: CalDavSource = {
       fetch: () => connector.fetch(),
