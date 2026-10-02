@@ -2,59 +2,71 @@ import ICAL from "ical.js";
 import { AgendaEvent } from "./event";
 import { isoDurationToMinutes } from "./ical-gen";
 
-export function icalToEvents(ics: string, source: string, protocol = "imap"): AgendaEvent[] {
-  const comp = new ICAL.Component(ICAL.parse(ics));
-  const vevents = comp.getAllSubcomponents("vevent");
-  const out: AgendaEvent[] = [];
-  for (const ve of vevents) {
-    const ev = new ICAL.Event(ve);
-    const start = ev.startDate;
-    if (!start) continue; // malformed VEVENT without DTSTART — skip, don't crash the whole feed
-    const end = ev.endDate;
-    const organizer = ve.getFirstPropertyValue("organizer");
-    const attendees = ve
-      .getAllProperties("attendee")
-      .map((p) => String(p.getFirstValue() ?? ""))
-      .filter((s) => s.length > 0);
-    const status = ve.getFirstPropertyValue("status");
-    const rrule = ve.getFirstPropertyValue("rrule");
-    const description = ve.getFirstPropertyValue("description");
-    // Multi-value CATEGORIES: only the first value is kept (documented limitation).
-    const categories = ve.getFirstPropertyValue("categories");
-    out.push({
-      uid: ev.uid,
-      title: ev.summary || "(no title)",
-      start: start ? start.toString() : "",
-      end: end ? end.toString() : undefined,
-      allDay: start ? start.isDate : undefined,
-      tz: start && start.zone && start.zone.tzid && start.zone.tzid !== "floating" ? start.zone.tzid : undefined,
-      location: ev.location || undefined,
-      organizer: organizer ? String(organizer).replace(/^mailto:/i, "") : undefined,
-      attendees: attendees.length ? attendees.map((a) => a.replace(/^mailto:/i, "")) : undefined,
-      status: status ? String(status).toLowerCase() : undefined,
-      rrule: rrule ? String(rrule.toString()) : undefined,
-      description: description ? String(description) : undefined,
-      category: categories ? String(categories) : undefined,
-      exdates: parseExdates(ve),
-      ...reminderFields(ve, start),
-      origin: "synced",
-      source,
-      protocol,
-    });
-  }
-  return out;
+// Convert a non-DATE ICAL.Time into the display zone's wall clock.  
+function toWallClock(t: ICAL.Time, zone: ICAL.Timezone): ICAL.Time {  
+  return t.convertToZone(zone);  
+}  
+
+export function icalToEvents(ics: string, source: string, protocol = "imap", displayTz?: string): AgendaEvent[] {  
+  const zone =  
+    displayTz && displayTz !== "UTC" && displayTz !== "floating"  
+      ? ICAL.TimezoneService.get(displayTz) ?? undefined  
+      : undefined;  
+  const comp = new ICAL.Component(ICAL.parse(ics));  
+  const vevents = comp.getAllSubcomponents("vevent");  
+  const out: AgendaEvent[] = [];  
+  for (const ve of vevents) {  
+    const ev = new ICAL.Event(ve);  
+    const start = ev.startDate;  
+    if (!start) continue; // malformed VEVENT without DTSTART — skip, don't crash the whole feed  
+    const end = ev.endDate;  
+    // Convert zoned (non-DATE) times into the display zone's wall clock.  
+    const wStart = zone && !start.isDate ? toWallClock(start, zone) : start;  
+    const wEnd = zone && end && !end.isDate ? toWallClock(end, zone) : end;  
+    const organizer = ve.getFirstPropertyValue("organizer");  
+    const attendees = ve  
+      .getAllProperties("attendee")  
+      .map((p) => String(p.getFirstValue() ?? ""))  
+      .filter((s) => s.length > 0);  
+    const status = ve.getFirstPropertyValue("status");  
+    const rrule = ve.getFirstPropertyValue("rrule");  
+    const description = ve.getFirstPropertyValue("description");  
+    // Multi-value CATEGORIES: only the first value is kept (documented limitation).  
+    const categories = ve.getFirstPropertyValue("categories");  
+    out.push({  
+      uid: ev.uid,  
+      title: ev.summary || "(no title)",  
+      start: wStart.toString(),  
+      end: wEnd ? wEnd.toString() : undefined,  
+      allDay: start.isDate,  
+      tz: zone && !start.isDate ? displayTz : (start.zone?.tzid && start.zone.tzid !== "floating" ? start.zone.tzid : undefined),  
+      location: ev.location || undefined,  
+      organizer: organizer ? String(organizer).replace(/^mailto:/i, "") : undefined,  
+      attendees: attendees.length ? attendees.map((a) => a.replace(/^mailto:/i, "")) : undefined,  
+      status: status ? String(status).toLowerCase() : undefined,  
+      rrule: rrule ? String(rrule.toString()) : undefined,  
+      description: description ? String(description) : undefined,  
+      category: categories ? String(categories) : undefined,  
+      exdates: parseExdates(ve, zone),  
+      ...reminderFields(ve, start),  
+      origin: "synced",  
+      source,  
+      protocol,  
+    });  
+  }  
+  return out;  
 }
 
 /** EXDATE 属性 → ISO 字符串数组("2026-07-15" / "2026-07-15T15:00:00")。 */
-function parseExdates(ve: ICAL.Component): string[] | undefined {
-  const props = ve.getAllProperties("exdate");
-  if (!props.length) return undefined;
-  const out: string[] = [];
-  for (const p of props) {
-    const v = p.getFirstValue();
-    if (v instanceof ICAL.Time) out.push(v.toString());
-  }
-  return out.length ? out : undefined;
+function parseExdates(ve: ICAL.Component, zone?: ICAL.Timezone): string[] | undefined {  
+  const props = ve.getAllProperties("exdate");  
+  if (!props.length) return undefined;  
+  const out: string[] = [];  
+  for (const p of props) {  
+    const v = p.getFirstValue();  
+    if (v instanceof ICAL.Time) out.push((zone && !v.isDate ? toWallClock(v, zone) : v).toString());  
+  }  
+  return out.length ? out : undefined;  
 }
 
 function reminderFields(ve: ICAL.Component, start: ICAL.Time): { reminders?: number[]; reminder?: number } {
