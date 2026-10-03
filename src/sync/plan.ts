@@ -104,15 +104,22 @@ export function planSync(
     const s = serverByUid.get(l.uid);
     if (!s) continue; // previously synced, but this fetch has no matching uid — not a D2 concern
 
-    const localChanged = hashEvent(fieldsToEvent(l.fields)) !== (l.fields["base_hash"] ?? "");
-    const serverChanged = s.etag !== l.fields["etag"];
-
-    if (localChanged && serverChanged) {
-      conflicts.push({ uid: l.uid, local: l, server: s });
-    } else if (localChanged) {
-      pushUpdate.push(fieldsToEvent(l.fields));
-    } else if (serverChanged) {
-      applyServer.push(s);
+    const localChanged = hashEvent(fieldsToEvent(l.fields)) !== (l.fields["base_hash"] ?? "");  
+    const serverChanged = s.etag !== l.fields["etag"];  
+    // Ingest-format migration: etag unchanged but the stored representation drifted  
+    // (e.g. events ingested before UTC→local wall-clock conversion). Re-apply the  
+    // server version locally; no server write needed since the instant is identical.  
+    const formatDrift =  
+      s.start !== (l.fields["start"] ?? "") ||  
+      (s.end ?? "") !== (l.fields["end"] ?? "") ||  
+      (s.tz ?? "") !== (l.fields["tz"] ?? "");  
+  
+    if (localChanged && serverChanged) {  
+      conflicts.push({ uid: l.uid, local: l, server: s });  
+    } else if (localChanged) {  
+      pushUpdate.push(fieldsToEvent(l.fields));  
+    } else if (serverChanged || formatDrift) {  
+      applyServer.push(s);  
     }
   }
 
