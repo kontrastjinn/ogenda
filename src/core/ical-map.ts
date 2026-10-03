@@ -2,16 +2,20 @@ import ICAL from "ical.js";
 import { AgendaEvent } from "./event";
 import { isoDurationToMinutes } from "./ical-gen";
 
-// Convert a non-DATE ICAL.Time into the display zone's wall clock.  
-function toWallClock(t: ICAL.Time, zone: ICAL.Timezone): ICAL.Time {  
-  return t.convertToZone(zone);  
-}  
+// Render an ICAL.Time's instant as wall clock in `tz` (IANA), ISO format, no Z.  
+function toWallClockString(t: ICAL.Time, tz: string): string {  
+  const parts = new Intl.DateTimeFormat("en-US", {  
+    timeZone: tz,  
+    year: "numeric", month: "2-digit", day: "2-digit",  
+    hour: "2-digit", minute: "2-digit", second: "2-digit",  
+    hourCycle: "h23",  
+  }).formatToParts(new Date(t.toUnixTime() * 1000));  
+  const p = (type: string) => parts.find((x) => x.type === type)!.value;  
+  return `${p("year")}-${p("month")}-${p("day")}T${p("hour")}:${p("minute")}:${p("second")}`;  
+}
 
 export function icalToEvents(ics: string, source: string, protocol = "imap", displayTz?: string): AgendaEvent[] {  
-  const zone =  
-    displayTz && displayTz !== "UTC" && displayTz !== "floating"  
-      ? ICAL.TimezoneService.get(displayTz) ?? undefined  
-      : undefined;  
+  const zone = displayTz && displayTz !== "UTC" && displayTz !== "floating" ? displayTz : undefined;  
   const comp = new ICAL.Component(ICAL.parse(ics));  
   const vevents = comp.getAllSubcomponents("vevent");  
   const out: AgendaEvent[] = [];  
@@ -20,9 +24,6 @@ export function icalToEvents(ics: string, source: string, protocol = "imap", dis
     const start = ev.startDate;  
     if (!start) continue; // malformed VEVENT without DTSTART — skip, don't crash the whole feed  
     const end = ev.endDate;  
-    // Convert zoned (non-DATE) times into the display zone's wall clock.  
-    const wStart = zone && !start.isDate ? toWallClock(start, zone) : start;  
-    const wEnd = zone && end && !end.isDate ? toWallClock(end, zone) : end;  
     const organizer = ve.getFirstPropertyValue("organizer");  
     const attendees = ve  
       .getAllProperties("attendee")  
@@ -36,10 +37,10 @@ export function icalToEvents(ics: string, source: string, protocol = "imap", dis
     out.push({  
       uid: ev.uid,  
       title: ev.summary || "(no title)",  
-      start: wStart.toString(),  
-      end: wEnd ? wEnd.toString() : undefined,  
+      start: zone && !start.isDate ? toWallClockString(start, zone) : start.toString(),  
+      end: zone && end && !end.isDate ? toWallClockString(end, zone) : (end ? end.toString() : undefined),  
       allDay: start.isDate,  
-      tz: zone && !start.isDate ? displayTz : (start.zone?.tzid && start.zone.tzid !== "floating" ? start.zone.tzid : undefined),  
+      tz: zone && !start.isDate ? zone : (start.zone?.tzid && start.zone.tzid !== "floating" ? start.zone.tzid : undefined),  
       location: ev.location || undefined,  
       organizer: organizer ? String(organizer).replace(/^mailto:/i, "") : undefined,  
       attendees: attendees.length ? attendees.map((a) => a.replace(/^mailto:/i, "")) : undefined,  
@@ -58,13 +59,24 @@ export function icalToEvents(ics: string, source: string, protocol = "imap", dis
 }
 
 /** EXDATE 属性 → ISO 字符串数组("2026-07-15" / "2026-07-15T15:00:00")。 */
-function parseExdates(ve: ICAL.Component, zone?: ICAL.Timezone): string[] | undefined {  
+function parseExdates(ve: ICAL.Component, zone?: string): string[] | undefined {  
   const props = ve.getAllProperties("exdate");  
   if (!props.length) return undefined;  
   const out: string[] = [];  
   for (const p of props) {  
     const v = p.getFirstValue();  
-    if (v instanceof ICAL.Time) out.push((zone && !v.isDate ? toWallClock(v, zone) : v).toString());  
+    if (v instanceof ICAL.Time) out.push(zone && !v.isDate ? toWallClockString(v, zone) : v.toString());  
+  }  
+  return out.length ? out : undefined;  
+}
+
+function parseExdates(ve: ICAL.Component, zone?: string): string[] | undefined {  
+  const props = ve.getAllProperties("exdate");  
+  if (!props.length) return undefined;  
+  const out: string[] = [];  
+  for (const p of props) {  
+    const v = p.getFirstValue();  
+    if (v instanceof ICAL.Time) out.push(zone && !v.isDate ? toWallClockString(v, zone) : v.toString());  
   }  
   return out.length ? out : undefined;  
 }
