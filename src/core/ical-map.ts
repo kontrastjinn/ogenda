@@ -70,17 +70,6 @@ function parseExdates(ve: ICAL.Component, zone?: string): string[] | undefined {
   return out.length ? out : undefined;  
 }
 
-function parseExdates(ve: ICAL.Component, zone?: string): string[] | undefined {  
-  const props = ve.getAllProperties("exdate");  
-  if (!props.length) return undefined;  
-  const out: string[] = [];  
-  for (const p of props) {  
-    const v = p.getFirstValue();  
-    if (v instanceof ICAL.Time) out.push(zone && !v.isDate ? toWallClockString(v, zone) : v.toString());  
-  }  
-  return out.length ? out : undefined;  
-}
-
 function reminderFields(ve: ICAL.Component, start: ICAL.Time): { reminders?: number[]; reminder?: number } {
   const reminders = ve
     .getAllSubcomponents("valarm")
