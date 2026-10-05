@@ -79,9 +79,9 @@ export async function syncBidirectional(
   const syncState = await store.readSyncState();
   const plan = planSync(server, local, syncState.tracked);
 
-  // Adopted events already carry the SERVER event's baseHash from planSync — never re-hash them.
+  // Adopted and category-restored events already carry their baseHash from planSync — never re-hash them.
   const toApply: AgendaEvent[] = plan.applyServer.map(withBaseHash);
-  toApply.push(...plan.adopt);
+  toApply.push(...plan.adopt, ...plan.restoreCategory);
 
   // Incremental persistence: staged changes reach disk in batches during the round, so an
   // abort (timeout, crash, quitting Obsidian) can only lose the events staged since the
@@ -121,7 +121,7 @@ export async function syncBidirectional(
   let pushed = 0;
   let created = 0;
 
-  for (const ev of plan.pushUpdate) {
+  for (const ev of [...plan.pushUpdate, ...plan.restoreCategory]) {
     // planSync only puts events with hasHref === true into pushUpdate, so href is always set here.
     await pace();
     try {
@@ -176,7 +176,7 @@ export async function syncBidirectional(
   }
 
   for (const c of plan.conflicts) {
-    toApply.push(withBaseHash(c.server));
+    toApply.push(c.restoreBaseHash ? { ...c.server, baseHash: c.restoreBaseHash } : withBaseHash(c.server));
     notify(t("sync.conflict", { title: c.server.title }));
     await flushIfDue();
   }
@@ -236,7 +236,7 @@ export async function syncBidirectional(
   await store.writeSyncState({ tracked: newTracked });
   notify(
     t("sync.complete", {
-      applied: plan.applyServer.length,
+      applied: plan.applyServer.length + plan.restoreCategory.length,
       adopted: plan.adopt.length,
       pushed,
       created,
@@ -248,7 +248,7 @@ export async function syncBidirectional(
   );
 
   return {
-    pulled: plan.applyServer.length,
+    pulled: plan.applyServer.length + plan.restoreCategory.length,
     pushed,
     created,
     adopted: plan.adopt.length,

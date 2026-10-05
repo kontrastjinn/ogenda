@@ -5,6 +5,8 @@ export interface SyncConflict {
   uid: string;
   local: LocalEvent;
   server: AgendaEvent;
+  /** Set when `server` carries a category restored from the local block (see `withLocalCategory`). */
+  restoreBaseHash?: string;
 }
 
 export interface SyncPlan {
@@ -18,6 +20,12 @@ export interface SyncPlan {
    */
   adopt: AgendaEvent[];
   conflicts: SyncConflict[];
+  /**
+   * Server-changed events whose new server copy lost the category the local block still has.
+   * Applied locally with the category kept, then PUT back so the server gets CATEGORIES again.
+   * baseHash is the hash of the category-less server copy, so a failed PUT retries next round.
+   */
+  restoreCategory: AgendaEvent[];
   deleteRemote: { uid: string; href: string; etag: string }[];
   markServerDeleted: AgendaEvent[];
 }
@@ -59,6 +67,17 @@ export function fieldsToEvent(fields: Record<string, string>): AgendaEvent {
 }
 
 /**
+ * Calendar apps without a category concept (Apple Calendar) drop CATEGORIES when they save
+ * an edited event. A category the server copy lost is treated as still set: the server copy
+ * gets the local category back, and its baseHash is the category-less server hash.
+ */
+function withLocalCategory(s: AgendaEvent, l: LocalEvent): AgendaEvent | undefined {
+  const category = l.fields["category"];
+  if (s.category || !category) return undefined;
+  return { ...s, category, baseHash: hashEvent(s) };
+}
+
+/**
  * Three-way diff (spec §6): local hash vs base_hash detects local edits;
  * server etag vs the locally-recorded etag detects server-side changes.
  * Deletion propagation (local block removed, or server no longer has a
@@ -78,6 +97,7 @@ export function planSync(
   const applyServer: AgendaEvent[] = [];
   const adopt: AgendaEvent[] = [];
   const conflicts: SyncConflict[] = [];
+  const restoreCategory: AgendaEvent[] = [];
   const deleteRemote: { uid: string; href: string; etag: string }[] = [];
   const markServerDeleted: AgendaEvent[] = [];
 
@@ -114,12 +134,18 @@ export function planSync(
       (s.end ?? "") !== (l.fields["end"] ?? "") ||  
       (s.tz ?? "") !== (l.fields["tz"] ?? "");  
   
-    if (localChanged && serverChanged) {  
-      conflicts.push({ uid: l.uid, local: l, server: s });  
-    } else if (localChanged) {  
-      pushUpdate.push(fieldsToEvent(l.fields));  
-    } else if (serverChanged || formatDrift) {  
-      applyServer.push(s);  
+    const restored = withLocalCategory(s, l);
+    if (localChanged && serverChanged) {
+      conflicts.push(
+        restored
+          ? { uid: l.uid, local: l, server: restored, restoreBaseHash: restored.baseHash }
+          : { uid: l.uid, local: l, server: s },
+      );
+    } else if (localChanged) {
+      pushUpdate.push(fieldsToEvent(l.fields));
+    } else if (serverChanged || formatDrift) {
+      if (restored) restoreCategory.push(restored);
+      else applyServer.push(s);
     }
   }
 
@@ -147,5 +173,14 @@ export function planSync(
   const deletedRemoteUids = new Set(deleteRemote.map((d) => d.uid));
   const reconciledApplyServer = applyServer.filter((s) => !deletedRemoteUids.has(s.uid));
 
-  return { pushUpdate, pushCreate, applyServer: reconciledApplyServer, adopt, conflicts, deleteRemote, markServerDeleted };
+  return {
+    pushUpdate,
+    pushCreate,
+    applyServer: reconciledApplyServer,
+    adopt,
+    conflicts,
+    restoreCategory,
+    deleteRemote,
+    markServerDeleted,
+  };
 }
