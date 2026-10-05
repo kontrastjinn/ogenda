@@ -500,3 +500,54 @@ describe("syncBidirectional", () => {
     expect(round2Calls[0].ifMatch).toBe('"srv1"');
   });
 });
+
+describe("syncBidirectional — category dropped by the server", () => {
+  it("keeps the local category, writes it back to the server, and is a no-op next round", async () => {
+    const fs = new InMemoryFileStore();
+    const store = new MonthlyStore(fs, "Agenda");
+    await store.sync([mkSynced({ category: "NameⳆSub" })]);
+    const p = "Agenda/2026-07.md";
+
+    const serverNew = mkSynced({ title: "服务器改的标题", etag: '"e2"' });
+    const calls: PutCall[] = [];
+    const summary = await syncBidirectional(fakeSource([serverNew], { status: 204, etag: '"e3"' }, calls), CAL_URL, store, () => {});
+
+    expect(summary.pulled).toBe(1);
+    expect(summary.pushed).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].ifMatch).toBe('"e2"');
+    expect(calls[0].ics).toContain("CATEGORIES:NameⳆSub");
+    expect(calls[0].ics).toContain("服务器改的标题");
+    const text = (await fs.read(p))!;
+    expect(text).toContain("category:: NameⳆSub");
+    expect(text).toContain("服务器改的标题");
+    expect(text).toContain('etag:: "e3"');
+
+    const serverRestored = mkSynced({ title: "服务器改的标题", category: "NameⳆSub", etag: '"e3"' });
+    const calls2: PutCall[] = [];
+    const summary2 = await syncBidirectional(fakeSource([serverRestored], { status: 204 }, calls2), CAL_URL, store, () => {});
+    expect(calls2).toHaveLength(0);
+    expect(summary2.pulled).toBe(0);
+  });
+
+  it("keeps the category locally after a 412 and retries the write-back next round", async () => {
+    const fs = new InMemoryFileStore();
+    const store = new MonthlyStore(fs, "Agenda");
+    await store.sync([mkSynced({ category: "NameⳆSub" })]);
+    const p = "Agenda/2026-07.md";
+
+    const serverNew = mkSynced({ title: "服务器改的标题", etag: '"e2"' });
+    const calls: PutCall[] = [];
+    await syncBidirectional(fakeSource([serverNew], { status: 412 }, calls), CAL_URL, store, () => {});
+    expect(calls).toHaveLength(1);
+    const text = (await fs.read(p))!;
+    expect(text).toContain("category:: NameⳆSub");
+    expect(text).toContain('etag:: "e2"');
+
+    const calls2: PutCall[] = [];
+    await syncBidirectional(fakeSource([serverNew], { status: 204, etag: '"e3"' }, calls2), CAL_URL, store, () => {});
+    expect(calls2).toHaveLength(1);
+    expect(calls2[0].ics).toContain("CATEGORIES:NameⳆSub");
+    expect((await fs.read(p))!).toContain('etag:: "e3"');
+  });
+});

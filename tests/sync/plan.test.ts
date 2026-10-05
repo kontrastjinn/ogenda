@@ -247,3 +247,41 @@ describe("fieldsToEvent — extended synced fields", () => {
     expect(plan.conflicts).toEqual([]);
   });
 });
+
+describe("planSync — category dropped by the server", () => {
+  it("keeps the local category and plans a write-back when the new server copy lost it", () => {
+    const l = mkLocal(serverEvent({ category: "NameⳆSub" }));
+    const sNew = serverEvent({ title: "服务器改的标题", etag: '"e2"' });
+    const plan = planSync([sNew], [l]);
+    expect(plan.applyServer).toEqual([]);
+    expect(plan.restoreCategory).toEqual([{ ...sNew, category: "NameⳆSub", baseHash: hashEvent(sNew) }]);
+  });
+
+  it("applies the server copy unchanged when it still carries a category", () => {
+    const l = mkLocal(serverEvent({ category: "NameⳆSub" }));
+    const sNew = serverEvent({ category: "Other", etag: '"e2"' });
+    const plan = planSync([sNew], [l]);
+    expect(plan.applyServer).toEqual([sNew]);
+    expect(plan.restoreCategory).toEqual([]);
+  });
+
+  it("applies the server copy unchanged when the local block has no category", () => {
+    const l = mkLocal(serverEvent());
+    const sNew = serverEvent({ title: "服务器改的标题", etag: '"e2"' });
+    const plan = planSync([sNew], [l]);
+    expect(plan.applyServer).toEqual([sNew]);
+    expect(plan.restoreCategory).toEqual([]);
+  });
+
+  it("carries the local category into a conflict's server copy", () => {
+    const s = serverEvent({ category: "NameⳆSub" });
+    const l = mkLocal(s);
+    l.fields.title = "本地改的标题";
+    const sNew = serverEvent({ title: "服务器改的标题", etag: '"e2"' });
+    const plan = planSync([sNew], [l]);
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.conflicts[0].server).toMatchObject({ title: "服务器改的标题", category: "NameⳆSub" });
+    expect(plan.conflicts[0].restoreBaseHash).toBe(hashEvent(sNew));
+    expect(plan.restoreCategory).toEqual([]);
+  });
+});
