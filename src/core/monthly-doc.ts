@@ -1,4 +1,4 @@
-import { AgendaEvent, eventToFields } from "./event";
+import { AgendaEvent, escapeMultiline, eventToFields, unescapeMultiline } from "./event";
 
 export interface EventBlock {
   heading: string;
@@ -9,17 +9,52 @@ export interface EventBlock {
 
 const HEADING_RE = /^##\s+(.*)$/;
 const FIELD_RE = /^-\s+([A-Za-z0-9_]+)::\s?(.*)$/;
+/** Fields whose multi-line values are written as indented lines under `- key::`. */
+const MULTILINE_FIELDS = new Set(["description"]);
+const INDENTED_RE = /^[\t ]/;
+
+/**
+ * Joins a multi-line field's indented lines back into its stored (escaped) value.
+ * Strips one tab when every line has one (exact inverse of serializeEventBlock),
+ * otherwise the indentation common to all non-blank lines (hand-typed spaces).
+ */
+function joinIndented(inline: string, lines: string[]): string {
+  const nonBlank = lines.filter((l) => l.trim().length);
+  let dedented: string[];
+  if (nonBlank.every((l) => l.startsWith("\t"))) {
+    dedented = lines.map((l) => (l.startsWith("\t") ? l.slice(1) : l.trim().length ? l : ""));
+  } else {
+    const indent = Math.min(...nonBlank.map((l) => /^[\t ]*/.exec(l)![0].length));
+    dedented = lines.map((l) => (l.trim().length ? l.slice(indent) : ""));
+  }
+  return escapeMultiline((inline.length ? [inline, ...dedented] : dedented).join("\n"));
+}
 
 export function parseMonthlyDoc(text: string): { preamble: string; blocks: EventBlock[] } {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const blocks: EventBlock[] = [];
   const preambleLines: string[] = [];
   let cur:
-    | { heading: string; fieldOrder: string[]; fields: Record<string, string>; proseLines: string[]; inFields: boolean }
+    | {
+        heading: string;
+        fieldOrder: string[];
+        fields: Record<string, string>;
+        proseLines: string[];
+        inFields: boolean;
+        multiline: { key: string; inline: string; lines: string[] } | null;
+      }
     | null = null;
+
+  const endMultiline = () => {
+    if (!cur?.multiline) return;
+    const { key, inline, lines } = cur.multiline;
+    if (lines.length) cur.fields[key] = joinIndented(inline, lines);
+    cur.multiline = null;
+  };
 
   const flush = () => {
     if (!cur) return;
+    endMultiline();
     blocks.push({
       heading: cur.heading,
       fields: cur.fields,
@@ -33,7 +68,7 @@ export function parseMonthlyDoc(text: string): { preamble: string; blocks: Event
     const h = HEADING_RE.exec(line);
     if (h) {
       flush();
-      cur = { heading: h[1].trim(), fieldOrder: [], fields: {}, proseLines: [], inFields: true };
+      cur = { heading: h[1].trim(), fieldOrder: [], fields: {}, proseLines: [], inFields: true, multiline: null };
       continue;
     }
     if (!cur) {
@@ -41,10 +76,16 @@ export function parseMonthlyDoc(text: string): { preamble: string; blocks: Event
       continue;
     }
     if (cur.inFields) {
+      if (cur.multiline && INDENTED_RE.test(line)) {
+        cur.multiline.lines.push(line);
+        continue;
+      }
+      endMultiline();
       const f = FIELD_RE.exec(line);
       if (f) {
         cur.fieldOrder.push(f[1]);
         cur.fields[f[1]] = f[2];
+        if (MULTILINE_FIELDS.has(f[1])) cur.multiline = { key: f[1], inline: f[2].trim(), lines: [] };
         continue;
       }
       cur.inFields = false;
@@ -61,7 +102,13 @@ export function serializeEventBlock(b: EventBlock): string {
   const oneLine = (s: string) => s.replace(/\r?\n/g, " ");
   const fieldLines = b.fieldOrder
     .filter((k) => b.fields[k] !== undefined)
-    .map((k) => `- ${k}:: ${oneLine(b.fields[k])}`);
+    .map((k) => {
+      if (MULTILINE_FIELDS.has(k)) {
+        const raw = unescapeMultiline(b.fields[k]);
+        if (raw.includes("\n")) return [`- ${k}::`, ...raw.split("\n").map((l) => `\t${l}`)].join("\n");
+      }
+      return `- ${k}:: ${oneLine(b.fields[k])}`;
+    });
   let out = `## ${oneLine(b.heading)}`;
   if (fieldLines.length) out += `\n${fieldLines.join("\n")}`;
   if (b.prose && b.prose.trim().length) out += `\n\n${b.prose}`;
