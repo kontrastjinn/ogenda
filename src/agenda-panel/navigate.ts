@@ -5,10 +5,13 @@ import { monthOf } from "../store/monthly-store";
 
 /** Opens the monthly file containing `event` and scrolls to its heading, if found. */
 export async function openEventSource(app: App, folder: string, event: AgendaEvent): Promise<void> {
-  const path = normalizePath(`${folder}/${monthOf(event.start)}.md`);
-  const file = app.vault.getAbstractFileByPath(path);
+  const month = monthOf(event.start);
+  const newPath = normalizePath(`${folder}/${month.slice(0,4)}/⸔${month}.md`);
+  const legacyPath = normalizePath(`${folder}/${month}.md`);
+  const file = app.vault.getAbstractFileByPath(newPath)
+            ?? app.vault.getAbstractFileByPath(legacyPath);
   if (!(file instanceof TFile)) return;
-
+  
   const leaf = app.workspace.getLeaf(false);
   await leaf.openFile(file);
 
