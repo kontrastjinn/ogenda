@@ -14,7 +14,19 @@ export class ObsidianFileStore implements FileStore {
     if (await this.vault.adapter.exists(p)) {
       return await this.vault.adapter.read(p);
     }
-    return null;
+ return null;
+  }
+  
+  async remove(path: string): Promise<void> {
+    const p = normalizePath(path);
+    const f = this.vault.getAbstractFileByPath(p);
+    if (f instanceof TFile) {
+      await this.vault.trash(f, false);
+      return;
+    }
+    if (await this.vault.adapter.exists(p)) {
+      await this.vault.adapter.remove(p);
+    }
   }
 
   async write(path: string, content: string): Promise<void> {
