@@ -15,7 +15,18 @@ const PANEL_CLEARABLE_FIELDS = [
 
 /** 月度文件名契约:只有 YYYY-MM.md 是月度日程笔记。同目录的备份(.bak)、杂散笔记、
  *  同步状态文件等一律不参与解析/删改——否则旧快照里的事件会被当成新日程重复显示。 */
-const MONTHLY_FILE_RE = /^\d{4}-\d{2}\.md$/;
+/**
+ * Monthly agenda file layout update for kontrastjinn/ogenda
+ * New write layout:  <storageFolder>/YYYY/⸔YYYY-MM.md
+ *   - Files written to per-year subfolders with U+2E14 (⸔) prefix
+ * Legacy read layout: <storageFolder>/YYYY-MM.md
+ *   - Flat folder structure (no subfolders), no prefix.
+ * ∵ Both schemes must be readable. No data migration needed.
+ * MONTHLY_FILE_RE regex pattern: /^(⸔)?\d{4}-\d{2}\.md$/
+ *   - Accepts optional ⸔ prefix to support both new and legacy file names
+ *   - Ensures compatibility with existing YYYY-MM.md files
+ */
+const MONTHLY_FILE_RE = /^(⸔)?\d{4}-\d{2}\.md$/;
 
 /** 从目录 listing 中筛出月度笔记文件(按文件名,与 pathFor 的写入侧对应)。 */
 function monthlyPaths(paths: string[]): string[] {
@@ -57,7 +68,7 @@ export class MonthlyStore {
   constructor(private store: FileStore, private folder: string) {}
 
   private pathFor(month: string): string {
-    return `${this.folder}/${month}.md`;
+    return `${this.folder}/${month.slice(0,4)}/⸔${month}.md`;
   }
 
   async sync(events: AgendaEvent[]): Promise<SyncSummary> {
@@ -71,7 +82,16 @@ export class MonthlyStore {
     let added = 0;
     let updated = 0;
     const months: string[] = [];
-    if (byMonth.size > 0) await this.store.ensureFolder(this.folder);
+    /** 
+    Originally, sync() calls ensureFolder(this.folder) once and
+    * savePanelEvent does the same. After the change, pathFor(month)
+    * writes to ${folder}/2026/⸔2026-09.md — the 2026/ subfolder may not exist
+    * yet, and write() does not create directories. So each call site must ensure the
+    * year subfolder, which varies per month in sync()'s loop: */
+    const years = new Set([...byMonth.keys()].map((m) => m.slice(0, 4)));  
+    for (const y of years) {  
+      await this.store.ensureFolder(`${this.folder}/${y}`);  
+    }  
     for (const [month, monthEvents] of byMonth) {
       const path = this.pathFor(month);
       const existing = (await this.store.read(path)) ?? "";
@@ -89,7 +109,7 @@ export class MonthlyStore {
   }
 
   async readEvents(): Promise<ReadEventsResult> {
-    const paths = monthlyPaths(await this.store.list(this.folder));
+    const paths = await this.allMonthlyPaths();
     const out: LocalEvent[] = [];
     let skipped = 0;
     for (const path of paths) {
@@ -119,13 +139,14 @@ export class MonthlyStore {
   }
 
   /**
-   * Panel-edit write path: like sync() for a single event, but blanked optional
-   * fields are DELETED (clearFields). Sync's merge semantics (which protect
-   * href/etag/base_hash) are intentionally left untouched — see upsertEvents.
-   */
+    * Panel-edit write path: like sync() for a single event, but blanked optional
+    * fields are DELETED (clearFields). Sync's merge semantics (which protect
+    * href/etag/base_hash) are intentionally left untouched — see upsertEvents.
+    */
   async savePanelEvent(event: AgendaEvent): Promise<SyncSummary> {
-    await this.store.ensureFolder(this.folder);
+    // sync() — inside the loop, per month (or pre-collect unique years)
     const month = monthOf(event.start);
+    await this.store.ensureFolder(`${this.folder}/${month.slice(0,4)}`);
     const path = this.pathFor(month);
     const existing = (await this.store.read(path)) ?? "";
     const seed = existing || `# ${month}\n`;
@@ -136,11 +157,20 @@ export class MonthlyStore {
     return { added: r.added, updated: r.updated, months: r.added > 0 || r.updated > 0 ? [month] : [] };
   }
 
+  
+  private async allMonthlyPaths(): Promise<string[]> {
+    const rootFiles = await this.store.list(this.folder);
+    const subfolders = (await this.store.listFolders(this.folder))
+      .filter((f) => /^\d{4}$/.test(f.slice(f.lastIndexOf("/") + 1)));
+    const nested = (await Promise.all(subfolders.map((f) => this.store.list(f)))).flat();
+    return monthlyPaths([...rootFiles, ...nested]);
+  }
+  
   /** Removes event blocks matching the given uids from whichever monthly files contain them. */
   async removeByUid(uids: string[]): Promise<void> {
     if (uids.length === 0) return;
     const uidSet = new Set(uids);
-    const paths = monthlyPaths(await this.store.list(this.folder));
+    const paths = await this.allMonthlyPaths();
     for (const path of paths) {
       const text = await this.store.read(path);
       if (!text) continue;
