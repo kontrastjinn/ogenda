@@ -43,10 +43,10 @@ export class ObsidianFileStore implements FileStore {
     }
   }
 
-  async list(folder: string): Promise<string[]> {
+  async listFolders(folder: string): Promise<string[]> {
     const f = this.vault.getAbstractFileByPath(normalizePath(folder));
     if (!(f instanceof TFolder)) return [];
-    return f.children.filter((c): c is TFile => c instanceof TFile).map((c) => c.path);
+    return f.children.filter((c): c is TFolder => c instanceof TFolder).map((c) => c.path);
   }
 
   private async ensureParent(filePath: string): Promise<void> {
