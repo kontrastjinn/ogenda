@@ -10,6 +10,8 @@ export interface FileStore {
   list(folder: string): Promise<string[]>;
   /** paths of folders directly inside a folder (non-recursive); [] if none */
   listFolders(folder: string): Promise<string[]>;
+  /** delete the file if it exists; no-op otherwise */
+  remove(path: string): Promise<void>;
 }
 
 export class InMemoryFileStore implements FileStore {
@@ -28,6 +30,11 @@ export class InMemoryFileStore implements FileStore {
     const prefix = `${folder}/`;
     return [...this.files.keys()].filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"));
   }
+
+  async remove(path: string): Promise<void> {
+    this.files.delete(path);
+  }
+  
   async listFolders(folder: string): Promise<string[]> {
     const prefix = `${folder}/`;
     const subs = new Set<string>();
