@@ -21,7 +21,7 @@ const PANEL_CLEARABLE_FIELDS = [
  *   - Files written to per-year subfolders with U+2E14 (⸔) prefix
  * Legacy read layout: <storageFolder>/YYYY-MM.md
  *   - Flat folder structure (no subfolders), no prefix.
- * ∵ Both schemes must be readable. No data migration needed.
+ *   - Both schemes are readable; writes go to the new layout and migrate legacy files on write.
  * MONTHLY_FILE_RE regex pattern: /^(⸔)?\d{4}-\d{2}\.md$/
  *   - Accepts optional ⸔ prefix to support both new and legacy file names
  *   - Ensures compatibility with existing YYYY-MM.md files
@@ -82,24 +82,19 @@ export class MonthlyStore {
     let added = 0;
     let updated = 0;
     const months: string[] = [];
-    /** 
-    Originally, sync() calls ensureFolder(this.folder) once and
-    * savePanelEvent does the same. After the change, pathFor(month)
-    * writes to ${folder}/2026/⸔2026-09.md — the 2026/ subfolder may not exist
-    * yet, and write() does not create directories. So each call site must ensure the
-    * year subfolder, which varies per month in sync()'s loop: */
+    
     const years = new Set([...byMonth.keys()].map((m) => m.slice(0, 4)));  
     for (const y of years) {  
       await this.store.ensureFolder(`${this.folder}/${y}`);  
     }  
     for (const [month, monthEvents] of byMonth) {
       const path = this.pathFor(month);
-      const existing = (await this.store.read(path)) ?? "";
-      const seed = existing || `# ${month}\n`;
+      const { seed, legacyPath } = await this.seedFor(month);
       const r = upsertEvents(seed, monthEvents, { clearFields: SYNC_CLEARABLE_FIELDS });
       // skip the write entirely when nothing changed (avoids churn + misleading "updated" counts)
       if (r.added > 0 || r.updated > 0) {
         await this.store.write(path, r.text);
+        if (legacyPath) await this.store.remove(legacyPath);
         added += r.added;
         updated += r.updated;
         months.push(month);
@@ -144,19 +139,41 @@ export class MonthlyStore {
     * href/etag/base_hash) are intentionally left untouched — see upsertEvents.
     */
   async savePanelEvent(event: AgendaEvent): Promise<SyncSummary> {
-    // sync() — inside the loop, per month (or pre-collect unique years)
     const month = monthOf(event.start);
     await this.store.ensureFolder(`${this.folder}/${month.slice(0,4)}`);
     const path = this.pathFor(month);
-    const existing = (await this.store.read(path)) ?? "";
-    const seed = existing || `# ${month}\n`;
+    const { seed, legacyPath } = await this.seedFor(month);
     const r = upsertEvents(seed, [event], { clearFields: PANEL_CLEARABLE_FIELDS });
     if (r.added > 0 || r.updated > 0) {
       await this.store.write(path, r.text);
+      if (legacyPath) await this.store.remove(legacyPath);
     }
     return { added: r.added, updated: r.updated, months: r.added > 0 || r.updated > 0 ? [month] : [] };
   }
-
+  
+  /**
+   * Picks the seed for writing `month`'s new-layout file. Prefers the new file;
+   * falls back to the legacy flat file so its blocks are carried over. When
+   * both exist (partial manual rename), merges them uid-deduped. Returns the
+   * legacy path to delete after a successful write, or null if none applies.
+   */
+  private async seedFor(month: string): Promise<{ seed: string; legacyPath: string | null }> {
+    const newPath = this.pathFor(month);
+    const legacyPath = `${this.folder}/${month}.md`;
+    const existing = await this.store.read(newPath);
+    const legacy = await this.store.read(legacyPath);
+    if (existing !== null && legacy !== null) {
+      const { preamble, blocks: newBlocks } = parseMonthlyDoc(existing);
+      const { blocks: legacyBlocks } = parseMonthlyDoc(legacy);
+      const newUids = new Set(newBlocks.map((b) => b.fields["uid"]));
+      const extras = legacyBlocks.filter((b) => !newUids.has(b.fields["uid"]));
+      const seed = serializeMonthlyDoc(preamble, [...newBlocks, ...extras]);
+      return { seed, legacyPath };
+    }
+    if (existing !== null) return { seed: existing, legacyPath: null };
+    if (legacy !== null) return { seed: legacy, legacyPath };
+    return { seed: `# ${month}\n`, legacyPath: null };
+  }
   
   private async allMonthlyPaths(): Promise<string[]> {
     const rootFiles = await this.store.list(this.folder);
