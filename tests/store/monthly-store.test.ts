@@ -18,14 +18,14 @@ describe("MonthlyStore", () => {
     const s = await store.sync([mk("a@x", "2026-07-14T15:00:00", "七"), mk("b@x", "2026-08-01T09:00:00", "八")]);
     expect(s.added).toBe(2);
     expect(s.months.sort()).toEqual(["2026-07", "2026-08"]);
-    expect(await fs.read("Agenda/2026-07.md")).toContain("a@x");
-    expect(await fs.read("Agenda/2026-08.md")).toContain("b@x");
+    expect(await fs.read("Agenda/2026/⸔2026-07.md")).toContain("a@x");
+    expect(await fs.read("Agenda/2026/⸔2026-08.md")).toContain("b@x");
   });
   it("is idempotent by uid and preserves user prose across re-sync", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mk("a@x", "2026-07-14T15:00:00", "会")]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/\n$/, "") + "\n\n我的纪要\n");
     const s2 = await store.sync([mk("a@x", "2026-07-14T15:00:00", "会")]);
     expect(s2.added).toBe(0);
@@ -36,7 +36,7 @@ describe("MonthlyStore", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mk("a@x", "2026-07-14T15:00:00", "会")]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     const before = await fs.read(p);
     const s2 = await store.sync([mk("a@x", "2026-07-14T15:00:00", "会")]);
     expect(s2.added).toBe(0);
@@ -58,7 +58,7 @@ describe("MonthlyStore.readEvents", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mk("a@x", "2026-07-14T15:00:00", "七月会"), mk("b@x", "2026-08-01T09:00:00", "八月会")]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/\n$/, "") + "\n\n我的纪要\n");
 
     const { events } = await store.readEvents();
@@ -90,7 +90,7 @@ describe("MonthlyStore.readEvents", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mk("good@x", "2026-07-14T15:00:00", "正常事件")]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     const text = (await fs.read(p))!;
     await fs.write(
       p,
@@ -131,7 +131,7 @@ describe("MonthlyStore — 文件夹过滤:只认 YYYY-MM.md 月度文件", () =
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mk("a@x", "2026-07-14T15:00:00", "会")]);
     // 备份快照(旧事件的完整副本):若被解析,每个事件都会重复显示
-    await fs.write("Agenda/2026-07.md.bak", (await fs.read("Agenda/2026-07.md"))!);
+    await fs.write("Agenda/2026-07.md.bak", (await fs.read("Agenda/2026/⸔2026-07.md"))!);
     // 杂散笔记:即便里面有长得像事件块的内容,也不属于月度日程
     await fs.write("Agenda/随手记.md", "## 10:00–11:00 杂事\n- uid:: stray@x\n- start:: 2026-07-15T10:00:00\n- end:: 2026-07-15T11:00:00\n");
     // 同步状态文件
@@ -146,12 +146,24 @@ describe("MonthlyStore — 文件夹过滤:只认 YYYY-MM.md 月度文件", () =
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mk("a@x", "2026-07-14T15:00:00", "会")]);
-    const bak = (await fs.read("Agenda/2026-07.md"))!;
+    const bak = (await fs.read("Agenda/2026/⸔2026-07.md"))!;
     await fs.write("Agenda/2026-07.md.bak", bak);
 
     await store.removeByUid(["a@x"]);
-    expect(await fs.read("Agenda/2026-07.md")).not.toContain("a@x");
+    expect(await fs.read("Agenda/2026/⸔2026-07.md")).not.toContain("a@x");
     expect(await fs.read("Agenda/2026-07.md.bak")).toBe(bak); // 备份不是月度笔记,原样保留
+  });
+
+  it("removeByUid removes events across legacy and new layouts", async () => {
+    const fs = new InMemoryFileStore();
+    const store = new MonthlyStore(fs, "Agenda");
+    await fs.write("Agenda/2026-07.md",
+      "# 2026-07\n\n## 会\n- uid:: a@x\n- title:: 会\n- start:: 2026-07-14T10:00:00\n");
+    await store.sync([mk("b@x", "2026-08-01T09:00:00", "八月会")]); // lands in Agenda/2026/⸔2026-08.md
+    
+    await store.removeByUid(["a@x", "b@x"]);
+    expect(await fs.read("Agenda/2026-07.md")).not.toContain("a@x");
+    expect(await fs.read("Agenda/2026/⸔2026-08.md")).not.toContain("b@x");
   });
 });
 
@@ -164,13 +176,28 @@ describe("MonthlyStore.savePanelEvent (#53)", () => {
       href: "https://x/a.ics", location: "会议室",
     };
     await store.savePanelEvent(ev);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     expect(await fs.read(p)).toContain("会议室");
 
     await store.savePanelEvent({ ...ev, location: undefined }); // user cleared location
     const text = (await fs.read(p))!;
     expect(text).not.toContain("会议室");
     expect(text).toContain("href:: https://x/a.ics");
+  });
+
+  it("migrates a legacy flat file into the year-folder layout on write", async () => {
+    const fs = new InMemoryFileStore();
+    const store = new MonthlyStore(fs, "Agenda");
+    // legacy file a user never renamed — contains event a@x
+    await fs.write("Agenda/2026-07.md",
+      "# 2026-07\n\n## 会\n- uid:: a@x\n- title:: 会\n- start:: 2026-07-14T10:00:00\n");
+    // a write hits the same month via a different event
+    await store.savePanelEvent(mk("b@x", "2026-07-20T09:00:00", "八月会"));
+    
+    const newFile = (await fs.read("Agenda/2026/⸔2026-07.md"))!;
+    expect(newFile).toContain("a@x");   // legacy content carried over — not lost
+    expect(newFile).toContain("b@x");   // plus the newly written event
+    expect(await fs.read("Agenda/2026-07.md")).toBeNull(); // legacy file deleted
   });
 });
 
@@ -187,7 +214,7 @@ describe("MonthlyStore.sync — server-authoritative field clearing", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([full("a@x")]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     let text = (await fs.read(p))!;
     expect(text).toContain("description:: 备注");
     expect(text).toContain("rsvp:: ACCEPTED");
@@ -214,7 +241,7 @@ describe("MonthlyStore.sync — server-authoritative field clearing", () => {
     await store.sync([full("a@x")]);
     const updated = { ...full("a@x"), description: "服务器改过的备注", etag: '"e2"' };
     await store.sync([updated]);
-    expect(await fs.read("Agenda/2026-07.md")).toContain("description:: 服务器改过的备注");
+    expect(await fs.read("Agenda/2026/⸔2026-07.md")).toContain("description:: 服务器改过的备注");
   });
 });
 
@@ -227,7 +254,7 @@ describe("MonthlyStore.savePanelEvent — description is panel-clearable", () =>
       href: "https://x/a.ics", description: "旧备注",
     };
     await store.savePanelEvent(ev);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     expect(await fs.read(p)).toContain("description:: 旧备注");
 
     await store.savePanelEvent({ ...ev, description: undefined });
