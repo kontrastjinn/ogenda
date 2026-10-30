@@ -62,7 +62,7 @@ describe("syncBidirectional", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/会议/g, "改过的会议"));
 
     const calls: PutCall[] = [];
@@ -90,11 +90,9 @@ describe("syncBidirectional", () => {
   it("creates a hand-written local block (no href) on the server and records the new href/etag", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
-    await fs.write(
-      p,
-      "# 2026-07\n\n## 15:00 新会议\n- uid:: new1\n- title:: 新会议\n- start:: 2026-07-15T15:00:00\n",
-    );
+    const legacy = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
+    await fs.write(legacy, "# 2026-07\n\n## 15:00 新会议\n- uid:: new1\n- title:: 新会议\n- start:: 2026-07-15T15:00:00\n");
 
     const calls: PutCall[] = [];
     const source = fakeSource([], { status: 201, etag: '"c1"' }, calls);
@@ -107,18 +105,19 @@ describe("syncBidirectional", () => {
     expect(calls[0].url).toBe("https://cal.example/home/new1.ics");
     expect(calls[0].ifMatch).toBeUndefined();
     expect(calls[0].ics).toContain("新会议");
-
+    
     const text = (await fs.read(p))!;
     expect(text).toContain("href:: https://cal.example/home/new1.ics");
     expect(text).toContain('etag:: "c1"');
     expect(text).toMatch(/base_hash:: \w+/);
+    expect(await fs.read(legacy)).toBeNull(); // legacy file migrated
   });
 
   it("pulls a server-side edit into the local file when local was not edited (no PUT)", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
 
     const serverNew = mkSynced({ title: "服务器改的标题", etag: '"e2"' });
     const calls: PutCall[] = [];
@@ -138,7 +137,7 @@ describe("syncBidirectional", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/会议/g, "本地改的会议"));
 
     const serverNew = mkSynced({ title: "服务器改的标题", etag: '"e2"' });
@@ -160,7 +159,7 @@ describe("syncBidirectional", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/会议/g, "改过的会议"));
     const before = await fs.read(p);
 
@@ -181,7 +180,7 @@ describe("syncBidirectional", () => {
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
     await store.writeSyncState({ tracked: { "a@x": TRACKED_A_X } });
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     // simulate the user deleting the whole block in Obsidian, leaving just the month heading
     const original = (await fs.read(p))!;
     await fs.write(p, original.replace(/\n\n## [\s\S]*/, "\n"));
@@ -205,7 +204,7 @@ describe("syncBidirectional", () => {
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
     await store.writeSyncState({ tracked: { "a@x": TRACKED_A_X } });
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/\n$/, "") + "\n\n我的会前笔记\n");
 
     const calls: PutCall[] = [];
@@ -253,7 +252,7 @@ describe("syncBidirectional", () => {
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
     await store.writeSyncState({ tracked: { "a@x": TRACKED_A_X } });
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     const original = (await fs.read(p))!;
     await fs.write(p, original.replace(/\n\n## [\s\S]*/, "\n"));
     const before = await fs.read(p);
@@ -277,7 +276,7 @@ describe("syncBidirectional", () => {
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced()]);
     await store.writeSyncState({ tracked: { "a@x": TRACKED_A_X } });
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, (await fs.read(p))!.replace(/\n\n## [\s\S]*/, "\n"));
 
     // round 1: delete attempt gets 412 (server-wins skip-and-retry)
@@ -301,7 +300,7 @@ describe("syncBidirectional", () => {
   it("isolates a throwing PUT and still persists the round's other successes", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(
       p,
       "# 2026-07\n\n## 甲\n- uid:: ok1\n- title:: 甲\n- start:: 2026-07-15T10:00:00\n\n## 炸\n- uid:: boom\n- title:: 炸\n- start:: 2026-07-15T11:00:00\n\n## 乙\n- uid:: ok2\n- title:: 乙\n- start:: 2026-07-15T12:00:00\n",
@@ -334,7 +333,7 @@ describe("syncBidirectional", () => {
   it("caps creates per round and reports the backlog for later rounds", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     const block = (i: number) =>
       `## 会${i}\n- uid:: cap${i}\n- title:: 会${i}\n- start:: 2026-07-15T1${i}:00:00\n`;
     await fs.write(p, "# 2026-07\n\n" + [0, 1, 2, 3, 4].map(block).join("\n"));
@@ -361,7 +360,7 @@ describe("syncBidirectional", () => {
   it("retries a 503 create with backoff and records the success", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(p, "# 2026-07\n\n## 会\n- uid:: r1\n- title:: 会\n- start:: 2026-07-15T10:00:00\n");
 
     let attempts = 0;
@@ -386,7 +385,7 @@ describe("syncBidirectional", () => {
   it("paces server writes (sleep between requests, none before the first)", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     const block = (i: number) => `## 会${i}\n- uid:: pace${i}\n- title:: 会${i}\n- start:: 2026-07-15T1${i}:00:00\n`;
     await fs.write(p, "# 2026-07\n\n" + [0, 1, 2].map(block).join("\n"));
 
@@ -408,7 +407,7 @@ describe("syncBidirectional", () => {
   it("adopts server href/etag for a no-href block already on the server (no PUT, prose kept, no-op next round)", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     await fs.write(
       p,
       "# 2026-07\n\n## 老会\n- uid:: old1\n- title:: 老会\n- start:: 2026-07-15T15:00:00\n- origin:: imported\n\n我手写的备注\n",
@@ -458,7 +457,7 @@ describe("syncBidirectional", () => {
   it("after adoption, a divergent local block pushes its content over the server's (local wins)", async () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
     // local block title differs from the server copy of the same uid
     await fs.write(
       p,
@@ -506,7 +505,7 @@ describe("syncBidirectional — category dropped by the server", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced({ category: "NameⳆSub" })]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
 
     const serverNew = mkSynced({ title: "服务器改的标题", etag: '"e2"' });
     const calls: PutCall[] = [];
@@ -534,7 +533,7 @@ describe("syncBidirectional — category dropped by the server", () => {
     const fs = new InMemoryFileStore();
     const store = new MonthlyStore(fs, "Agenda");
     await store.sync([mkSynced({ category: "NameⳆSub" })]);
-    const p = "Agenda/2026-07.md";
+    const p = "Agenda/2026/⸔2026-07.md";
 
     const serverNew = mkSynced({ title: "服务器改的标题", etag: '"e2"' });
     const calls: PutCall[] = [];
