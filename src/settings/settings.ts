@@ -26,7 +26,7 @@ export interface OgendaSettings {
 }
 
 export const DEFAULT_SETTINGS: OgendaSettings = {
-  storageFolder: "Agenda",
+  storageFolder: "𝜘Ergativable/Events",
   syncOnStartup: false,
   icloudUser: "",
   icloudAppPassword: "",
