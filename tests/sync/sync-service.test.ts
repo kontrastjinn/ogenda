@@ -20,7 +20,7 @@ describe("SyncService", () => {
     const svc = new SyncService([conn], store, (m) => msgs.push(m));
     const s = await svc.syncNow();
     expect(s.added).toBe(1);
-    expect(await fs.read("Agenda/2026-07.md")).toContain("a@x");
+    expect(await fs.read("Agenda/2026/⸔2026-07.md")).toContain("a@x");
     expect(msgs.some((m) => m.includes("同步完成"))).toBe(true);
   });
   it("keeps going when one connector throws", async () => {
